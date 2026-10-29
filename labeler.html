@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>AR Vision - Interactive Bounding Box Calibrator</title>
+    <style>
+        body { font-family: system-ui, sans-serif; background: #0F172A; color: #F8FAFC; margin: 0; padding: 20px; display: flex; gap: 20px; }
+        #canvas-container { position: relative; border: 2px solid #38BDF8; display: inline-block; }
+        canvas { display: block; cursor: crosshair; }
+        #controls { width: 320px; background: #1E293B; padding: 16px; border-radius: 8px; display: flex; flex-direction: column; gap: 12px; }
+        button { background: #0284C7; color: white; border: none; padding: 10px; border-radius: 6px; font-weight: bold; cursor: pointer; }
+        button:hover { background: #0369A1; }
+        .target-btn { display: flex; gap: 8px; }
+        .target-btn button { flex: 1; opacity: 0.6; }
+        .target-btn button.active { opacity: 1.0; border: 2px solid #FFF; }
+        pre { background: #0F172A; padding: 10px; border-radius: 6px; font-size: 11px; max-height: 200px; overflow-y: auto; }
+    </style>
+</head>
+<body>
+
+    <div id="canvas-container">
+        <canvas id="editorCanvas"></canvas>
+    </div>
+
+    <div id="controls">
+        <h3>AR Tracker Calibrator</h3>
+        <div>
+            <label>Video Time (s): <span id="timeVal">0.00</span></label>
+            <input type="range" id="timeSlider" min="0" max="22" step="0.5" value="0" style="width:100%;">
+        </div>
+
+        <div class="target-btn">
+            <button id="btnContainer" class="active" onclick="selectTarget('container')" style="background:#10B981;">Container</button>
+            <button id="btnTruck" onclick="selectTarget('truck')" style="background:#0284C7;">Truck Cab</button>
+        </div>
+
+        <label><input type="checkbox" id="partialCheck"> Partially Visible / Edge Cropped</label>
+        <label><input type="checkbox" id="offscreenCheck"> Off-Screen (Hide Box)</label>
+
+        <button onclick="saveCurrentKeyframe()">Set Control Keyframe</button>
+        <button onclick="exportJSON()" style="background:#059669;">Export Control JSON</button>
+
+        <h4>Control Keyframes Recorded:</h4>
+        <pre id="jsonPreview">{}</pre>
+    </div>
+
+    <script>
+        const video = document.createElement('video');
+        video.src = '15969738_540_960_30fps.mp4';
+        video.crossOrigin = 'anonymous';
+
+        const canvas = document.getElementById('editorCanvas');
+        const ctx = canvas.getContext('2d');
+        const timeSlider = document.getElementById('timeSlider');
+        const timeVal = document.getElementById('timeVal');
+
+        let currentTarget = 'container';
+        let keyframes = { container: [], truck: [] };
+
+        // Default initial coordinates [x, y, w, h] normalized
+        let activeBoxes = {
+            container: { x: 0.38, y: 0.26, w: 0.31, h: 0.24, partial: false, offscreen: false },
+            truck: { x: 0.03, y: 0.34, w: 0.22, h: 0.30, partial: true, offscreen: false }
+        };
+
+        let draggingCorner = null;
+        const cornerSize = 10;
+
+        video.addEventListener('loadedmetadata', () => {
+            canvas.width = video.videoWidth / 2;
+            canvas.height = video.videoHeight / 2;
+            timeSlider.max = video.duration;
+            renderFrame();
+        });
+
+        timeSlider.addEventListener('input', (e) => {
+            video.currentTime = e.target.value;
+            timeVal.innerText = parseFloat(e.target.value).toFixed(2);
+        });
+
+        video.addEventListener('seeked', renderFrame);
+
+        function selectTarget(target) {
+            currentTarget = target;
+            document.getElementById('btnContainer').classList.toggle('active', target === 'container');
+            document.getElementById('btnTruck').classList.toggle('active', target === 'truck');
+            renderFrame();
+        }
+
+        function renderFrame() {
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            ['container', 'truck'].forEach(target => {
+                const box = activeBoxes[target];
+                if (box.offscreen) return;
+
+                const color = target === 'container' ? '#10B981' : '#0284C7';
+                const bx = box.x * canvas.width;
+                const by = box.y * canvas.height;
+                const bw = box.w * canvas.width;
+                const bh = box.h * canvas.height;
+
+                // Draw bounding box
+                ctx.strokeStyle = color;
+                ctx.lineWidth = target === currentTarget ? 3 : 1.5;
+                ctx.setLineDash(box.partial ? [6, 4] : []); // Dashed line for partially visible objects
+                ctx.strokeRect(bx, by, bw, bh);
+                ctx.setLineDash([]);
+
+                // Draw interactive drag corners for active target
+                if (target === currentTarget) {
+                    ctx.fillStyle = '#FFFFFF';
+                    [[bx, by], [bx + bw, by], [bx, by + bh], [bx + bw, by + bh]].forEach(([cx, cy]) => {
+                        ctx.fillRect(cx - cornerSize/2, cy - cornerSize/2, cornerSize, cornerSize);
+                    });
+                }
+            });
+        }
+
+        // Drag and Drop Corner Logic
+        canvas.addEventListener('mousedown', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const mx = e.clientX - rect.left;
+            const my = e.clientY - rect.top;
+            const box = activeBoxes[currentTarget];
+
+            const bx = box.x * canvas.width;
+            const by = box.y * canvas.height;
+            const bw = box.w * canvas.width;
+            const bh = box.h * canvas.height;
+
+            // Check corner hit
+            if (Math.hypot(mx - bx, my - by) < cornerSize) draggingCorner = 'tl';
+            else if (Math.hypot(mx - (bx + bw), my - by) < cornerSize) draggingCorner = 'tr';
+            else if (Math.hypot(mx - bx, my - (by + bh)) < cornerSize) draggingCorner = 'bl';
+            else if (Math.hypot(mx - (bx + bw), my - (by + bh)) < cornerSize) draggingCorner = 'br';
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            if (!draggingCorner) return;
+            const rect = canvas.getBoundingClientRect();
+            const mx = (e.clientX - rect.left) / canvas.width;
+            const my = (e.clientY - rect.top) / canvas.height;
+            const box = activeBoxes[currentTarget];
+
+            if (draggingCorner === 'tl') {
+                box.w += (box.x - mx); box.h += (box.y - my); box.x = mx; box.y = my;
+            } else if (draggingCorner === 'tr') {
+                box.w = mx - box.x; box.h += (box.y - my); box.y = my;
+            } else if (draggingCorner === 'bl') {
+                box.w += (box.x - mx); box.x = mx; box.h = my - box.y;
+            } else if (draggingCorner === 'br') {
+                box.w = mx - box.x; box.h = my - box.y;
+            }
+            renderFrame();
+        });
+
+        window.addEventListener('mouseup', () => draggingCorner = null);
+
+        function saveCurrentKeyframe() {
+            const t = parseFloat(video.currentTime.toFixed(2));
+            const box = activeBoxes[currentTarget];
+            box.partial = document.getElementById('partialCheck').checked;
+            box.offscreen = document.getElementById('offscreenCheck').checked;
+
+            // Update or push keyframe
+            const list = keyframes[currentTarget];
+            const existingIdx = list.findIndex(k => Math.abs(k.t - t) < 0.1);
+            
+            const kData = {
+                t: t,
+                box: [round(box.x), round(box.y), round(box.w), round(box.h)],
+                partial: box.partial,
+                offscreen: box.offscreen
+            };
+
+            if (existingIdx >= 0) list[existingIdx] = kData;
+            else list.push(kData);
+
+            list.sort((a, b) => a.t - b.t);
+            document.getElementById('jsonPreview').innerText = JSON.stringify(keyframes, null, 2);
+        }
+
+        function round(val) { return Math.round(val * 10000) / 10000; }
+
+        function exportJSON() {
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(keyframes, null, 2));
+            const a = document.createElement('a');
+            a.href = dataStr;
+            a.download = "control_keyframes.json";
+            a.click();
+        }
+    </script>
+</body>
+</html>
