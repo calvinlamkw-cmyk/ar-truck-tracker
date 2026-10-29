@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>LOGIX AR Vision - Precision OCR Tracker</title>
+    <title>LOGIX AR Vision - AI Tracked Prototype</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body, html { width: 100%; height: 100%; overflow: hidden; background: #080C10; font-family: system-ui, -apple-system, sans-serif; color: #E2E8F0; }
@@ -11,16 +11,17 @@
         #video-container { position: relative; flex: 1; height: 100%; background: #000; display: flex; align-items: center; justify-content: center; }
         #webcam { width: 100%; height: 100%; object-fit: contain; }
         #overlay-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; }
-        #side-panel { width: 380px; height: 100%; background: #0F172A; border-left: 1px solid rgba(255, 255, 255, 0.1); display: flex; flex-direction: column; padding: 20px; gap: 16px; z-index: 10; }
-        .panel-header { font-size: 14px; font-weight: 700; color: #38BDF8; padding-bottom: 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.1); display: flex; justify-content: space-between; }
-        .card { display: none; background: rgba(30, 41, 59, 0.9); border: 1px solid rgba(56, 189, 248, 0.4); border-radius: 12px; padding: 16px; }
+        #side-panel { width: 380px; height: 100%; background: #0F172A; border-left: 1px solid rgba(255, 255, 255, 0.1); display: flex; flex-direction: column; padding: 20px; gap: 16px; z-index: 10; overflow-y: auto; }
+        .panel-header { font-size: 14px; font-weight: 700; color: #38BDF8; padding-bottom: 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.1); display: flex; justify-content: space-between; align-items: center; }
+        .badge { font-size: 10px; padding: 3px 8px; border-radius: 12px; font-weight: 600; text-transform: uppercase; background: rgba(16, 185, 129, 0.2); color: #10B981; border: 1px solid rgba(16, 185, 129, 0.4); }
+        .card { display: none; background: rgba(30, 41, 59, 0.9); border: 1px solid rgba(56, 189, 248, 0.4); border-radius: 12px; padding: 16px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4); }
         .card.active { display: block; }
         .card-title { font-size: 11px; color: #94A3B8; margin-bottom: 6px; display: flex; justify-content: space-between; }
         .card-main-val { font-size: 18px; font-weight: 700; font-family: monospace; color: #F8FAFC; margin-bottom: 10px; }
         .card-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 11px; }
         .data-label { color: #64748B; } .data-val { color: #CBD5E1; font-weight: 600; }
-        #top-bar { position: absolute; top: 16px; left: 16px; background: rgba(15, 23, 42, 0.8); backdrop-filter: blur(8px); padding: 8px 14px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1); font-size: 12px; z-index: 10; display: flex; gap: 12px; }
-        .dot { width: 8px; height: 8px; border-radius: 50%; background: #10B981; }
+        #top-bar { position: absolute; top: 16px; left: 16px; background: rgba(15, 23, 42, 0.8); backdrop-filter: blur(8px); padding: 8px 14px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1); font-size: 12px; z-index: 10; display: flex; gap: 12px; align-items: center; }
+        .dot { width: 8px; height: 8px; border-radius: 50%; background: #10B981; box-shadow: 0 0 8px #10B981; }
     </style>
 </head>
 <body>
@@ -35,20 +36,26 @@
         </div>
 
         <div id="side-panel">
-            <div class="panel-header">CONTAINER YARD TELEMETRY <span style="color:#10B981;">SYNCED</span></div>
+            <div class="panel-header">CONTAINER YARD TELEMETRY <span class="badge">AI SYNCED</span></div>
+            
             <div id="container-card" class="card">
                 <div class="card-title"><span>CONTAINER IDENTIFIER</span><span style="color:#10B981;">TRACKED</span></div>
                 <div class="card-main-val">EGSU 021124 8</div>
                 <div class="card-grid">
                     <div><span class="data-label">OPERATOR:</span> <span class="data-val">EVERGREEN</span></div>
                     <div><span class="data-label">TYPE:</span> <span class="data-val">22G1 (20FT)</span></div>
+                    <div><span class="data-label">COLOR:</span> <span class="data-val">GREEN</span></div>
+                    <div><span class="data-label">OCR CONF:</span> <span class="data-val">98.4%</span></div>
                 </div>
             </div>
+
             <div id="truck-card" class="card">
                 <div class="card-title"><span>PRIME MOVER FLEET</span><span style="color:#00E5FF;">TRACKED</span></div>
                 <div class="card-main-val">SLA 01</div>
                 <div class="card-grid">
                     <div><span class="data-label">MODEL:</span> <span class="data-val">SCANIA R-SERIES</span></div>
+                    <div><span class="data-label">STATUS:</span> <span class="data-val">IN TRANSIT</span></div>
+                    <div><span class="data-label">DEST:</span> <span class="data-val">YARD ZONE B</span></div>
                     <div><span class="data-label">SPEED:</span> <span class="data-val">12 KM/H</span></div>
                 </div>
             </div>
@@ -61,12 +68,27 @@
         const ctx = canvas.getContext('2d');
         const timeDisplay = document.getElementById('time-display');
 
-        function resizeCanvas() { canvas.width = video.clientWidth; canvas.height = video.clientHeight; }
+        let trackingData = null;
+
+        // Load pre-computed AI tracks JSON
+        fetch('tracks.json')
+            .then(res => res.json())
+            .then(data => {
+                trackingData = data;
+                console.log("AI Tracking Data Loaded Successfully!");
+            })
+            .catch(err => console.error("Error loading tracks.json:", err));
+
+        function resizeCanvas() {
+            canvas.width = video.clientWidth;
+            canvas.height = video.clientHeight;
+        }
+
         window.addEventListener('resize', resizeCanvas);
         video.addEventListener('loadedmetadata', resizeCanvas);
 
         function getRenderedVideoRect() {
-            const vw = video.videoWidth || 960, vh = video.videoHeight || 540;
+            const vw = video.videoWidth || 540, vh = video.videoHeight || 960;
             const cw = video.clientWidth, ch = video.clientHeight;
             const vRatio = vw / vh, cRatio = cw / ch;
             let rw, rh, rx, ry;
@@ -75,48 +97,49 @@
             return { x: rx, y: ry, w: rw, h: rh };
         }
 
-        function interpolate(t, keyframes) {
-            if (t < keyframes[0].t || t > keyframes[keyframes.length - 1].t) return null;
-            for (let i = 0; i < keyframes.length - 1; i++) {
-                let k1 = keyframes[i], k2 = keyframes[i + 1];
-                if (t >= k1.t && t <= k2.t) {
-                    let factor = (t - k1.t) / (k2.t - k1.t);
-                    return {
-                        x: k1.x + factor * (k2.x - k1.x),
-                        y: k1.y + factor * (k2.y - k1.y),
-                        w: k1.w + factor * (k2.w - k1.w),
-                        h: k1.h + factor * (k2.h - k1.h)
-                    };
+        function getTrackDataForTime(array, currentTime) {
+            if (!array || array.length === 0) return null;
+            // Find closest frame entry based on timestamp 't'
+            let closest = array[0];
+            let minDiff = Math.abs(closest.t - currentTime);
+            for (let i = 1; i < array.length; i++) {
+                let diff = Math.abs(array[i].t - currentTime);
+                if (diff < minDiff) {
+                    minDiff = diff;
+                    closest = array[i];
                 }
             }
-            return null;
+            // Only return if within 0.2 seconds tolerance
+            return minDiff < 0.2 ? closest : null;
         }
 
-        // Calibrated Multi-Point Keyframes mapped to true video aspect ratio
-        const containerKeyframes = [
-            { t: 0.0, x: 0.38, y: 0.26, w: 0.58, h: 0.24 },
-            { t: 2.5, x: 0.39, y: 0.26, w: 0.59, h: 0.25 },
-            { t: 5.0, x: 0.40, y: 0.26, w: 0.60, h: 0.26 },
-            { t: 8.0, x: 0.00, y: 0.25, w: 0.70, h: 0.28 }
-        ];
+        function drawHollowBox(box, color, label, sub, vRect) {
+            const x = vRect.x + (box.x * vRect.w);
+            const y = vRect.y + (box.y * vRect.h);
+            const w = box.w * vRect.w;
+            const h = box.h * vRect.h;
 
-        const truckKeyframes = [
-            { t: 4.5, x: 0.00, y: 0.35, w: 0.30, h: 0.28 },
-            { t: 7.0, x: 0.30, y: 0.35, w: 0.35, h: 0.30 },
-            { t: 10.0, x: 0.55, y: 0.35, w: 0.40, h: 0.32 },
-            { t: 14.0, x: 0.80, y: 0.35, w: 0.20, h: 0.35 }
-        ];
+            ctx.strokeStyle = color; 
+            ctx.lineWidth = 2.5; 
+            ctx.strokeRect(x, y, w, h);
 
-        function drawHollowBox(box, color, label, sub) {
-            const { x, y, w, h } = box;
-            ctx.strokeStyle = color; ctx.lineWidth = 2.5; ctx.strokeRect(x, y, w, h);
-            const len = 12; ctx.strokeStyle = '#FFF'; ctx.lineWidth = 3;
+            // HUD Corner Brackets
+            const len = 12; 
+            ctx.strokeStyle = '#FFF'; 
+            ctx.lineWidth = 3;
             ctx.beginPath(); ctx.moveTo(x, y + len); ctx.lineTo(x, y); ctx.lineTo(x + len, y); ctx.stroke();
             ctx.beginPath(); ctx.moveTo(x + w - len, y); ctx.lineTo(x + w, y); ctx.lineTo(x + w, y + len); ctx.stroke();
             ctx.beginPath(); ctx.moveTo(x, y + h - len); ctx.lineTo(x, y + h); ctx.lineTo(x + len, y + h); ctx.stroke();
             ctx.beginPath(); ctx.moveTo(x + w - len, y + h); ctx.lineTo(x + w, y + h); ctx.lineTo(x + w, y + h - len); ctx.stroke();
-            ctx.fillStyle = color; ctx.fillRect(x, y - 26, 120, 22);
-            ctx.fillStyle = '#000'; ctx.font = 'bold 10px sans-serif'; ctx.fillText(label, x + 6, y - 10);
+
+            // Floating Label
+            ctx.fillStyle = color; 
+            ctx.fillRect(x, y - 26, 130, 22);
+            ctx.fillStyle = '#000'; 
+            ctx.font = 'bold 10px sans-serif'; 
+            ctx.fillText(label, x + 6, y - 12);
+            ctx.font = '8px sans-serif';
+            ctx.fillText(sub, x + 6, y - 3);
         }
 
         function renderLoop() {
@@ -125,20 +148,24 @@
             timeDisplay.innerText = `00:${Math.floor(t).toString().padStart(2, '0')}`;
             const vRect = getRenderedVideoRect();
 
-            let cNorm = interpolate(t, containerKeyframes);
-            let tNorm = interpolate(t, truckKeyframes);
+            if (trackingData) {
+                const cTrack = getTrackDataForTime(trackingData.container, t);
+                const tTrack = getTrackDataForTime(trackingData.truck, t);
 
-            if (cNorm) {
-                let box = { x: vRect.x + cNorm.x * vRect.w, y: vRect.y + cNorm.y * vRect.h, w: cNorm.w * vRect.w, h: cNorm.h * vRect.h };
-                drawHollowBox(box, '#00FF66', 'EGSU 021124 8', 'EVERGREEN');
-                document.getElementById('container-card').classList.add('active');
-            } else { document.getElementById('container-card').classList.remove('active'); }
+                if (cTrack) {
+                    drawHollowBox(cTrack, '#00FF66', 'EGSU 021124 8', 'EVERGREEN 20FT', vRect);
+                    document.getElementById('container-card').classList.add('active');
+                } else {
+                    document.getElementById('container-card').classList.remove('active');
+                }
 
-            if (tNorm) {
-                let box = { x: vRect.x + tNorm.x * vRect.w, y: vRect.y + tNorm.y * vRect.h, w: tNorm.w * vRect.w, h: tNorm.h * vRect.h };
-                drawHollowBox(box, '#00E5FF', 'TRUCK: SLA 01', 'SCANIA');
-                document.getElementById('truck-card').classList.add('active');
-            } else { document.getElementById('truck-card').classList.remove('active'); }
+                if (tTrack) {
+                    drawHollowBox(tTrack, '#00E5FF', 'TRUCK: SLA 01', 'SCANIA R-SERIES', vRect);
+                    document.getElementById('truck-card').classList.add('active');
+                } else {
+                    document.getElementById('truck-card').classList.remove('active');
+                }
+            }
 
             requestAnimationFrame(renderLoop);
         }
