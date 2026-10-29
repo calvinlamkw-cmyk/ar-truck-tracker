@@ -212,7 +212,6 @@
                 <div class="bar-item" id="time-display">00:00</div>
             </div>
 
-            <!-- Video source -->
             <video id="webcam" src="15969738_540_960_30fps.mp4" autoplay playsinline muted loop crossorigin="anonymous"></video>
             <canvas id="overlay-canvas"></canvas>
 
@@ -288,17 +287,17 @@
             }
         }
 
-        // Keyframe calculations matching the video movement
+        // Tightly calibrated keyframes for container and truck head
         function getBoundingBoxes(t) {
             let boxes = [];
 
-            // 1. Container (Visible from 0s to 13s)
+            // 1. Container Box (EGSU 021124 8) - Visible from 0s to 13s
             if (t >= 0 && t <= 13) {
                 let progress = t / 13;
-                let width = canvas.width * 0.45;
-                let height = canvas.height * 0.55;
-                let x = (canvas.width * 0.52) - (progress * canvas.width * 0.65);
-                let y = canvas.height * 0.28;
+                let width = canvas.width * 0.42;
+                let height = canvas.height * 0.38;
+                let x = (canvas.width * 0.48) - (progress * canvas.width * 0.58);
+                let y = canvas.height * 0.30;
 
                 boxes.push({
                     type: 'container',
@@ -309,12 +308,12 @@
                 });
             }
 
-            // 2. Scania Truck Cab (Visible from 5s to 23s)
+            // 2. Truck Cab Box (SLA 01) - Visible from 5s to 23s, positioned strictly on the truck head
             if (t >= 5 && t <= 23) {
                 let progress = (t - 5) / 18;
-                let width = canvas.width * 0.35;
-                let height = canvas.height * 0.45;
-                let x = (canvas.width * 0.05) + (progress * canvas.width * 0.85);
+                let width = canvas.width * 0.24;
+                let height = canvas.height * 0.35;
+                let x = (canvas.width * 0.03) + (progress * canvas.width * 0.62);
                 let y = canvas.height * 0.35;
 
                 boxes.push({
@@ -339,9 +338,9 @@
             ctx.strokeRect(x, y, w, h);
 
             // Thick HUD Corner Accents
-            const len = 18;
+            const len = 14;
             ctx.strokeStyle = '#FFFFFF';
-            ctx.lineWidth = 4;
+            ctx.lineWidth = 3.5;
 
             // Top-Left
             ctx.beginPath(); ctx.moveTo(x, y + len); ctx.lineTo(x, y); ctx.lineTo(x + len, y); ctx.stroke();
@@ -354,15 +353,15 @@
 
             // Floating Label Badge
             ctx.fillStyle = color;
-            ctx.font = 'bold 12px sans-serif';
-            const badgeWidth = Math.max(ctx.measureText(label).width, ctx.measureText(sub).width) + 20;
+            ctx.font = 'bold 11px sans-serif';
+            const badgeWidth = Math.max(ctx.measureText(label).width, ctx.measureText(sub).width) + 16;
 
-            ctx.fillRect(x, y - 34, badgeWidth, 30);
+            ctx.fillRect(x, y - 30, badgeWidth, 26);
 
             ctx.fillStyle = '#000000';
-            ctx.fillText(label, x + 8, y - 18);
-            ctx.font = '10px sans-serif';
-            ctx.fillText(sub, x + 8, y - 7);
+            ctx.fillText(label, x + 6, y - 16);
+            ctx.font = '9px sans-serif';
+            ctx.fillText(sub, x + 6, y - 6);
         }
 
         // Render Loop
