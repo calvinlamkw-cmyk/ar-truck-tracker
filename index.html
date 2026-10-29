@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Mobile Web AR Bounding Box Tracker</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body, html {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #000;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+        /* AR Container */
+        #ar-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+        /* Camera Feed */
+        #webcam {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            z-index: 1;
+        }
+        /* Canvas Overlay (must have pointer-events: none so clicks pass through) */
+        #overlay-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 2;
+            pointer-events: none;
+        }
+        /* UI Loading / Status Banner */
+        #status-bar {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.7);
+            color: #fff;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            z-index: 10;
+            backdrop-filter: blur(5px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            text-align: center;
+            max-width: 90vw;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ar-container">
+        <div id="status-bar">Initializing Camera...</div>
+        <!-- playsinline is critical for iOS Safari -->
+        <video id="webcam" autoplay playsinline muted></video>
+        <canvas id="overlay-canvas"></canvas>
+    </div>
+
+    <script>
+        const video = document.getElementById('webcam');
+        const canvas = document.getElementById('overlay-canvas');
+        const ctx = canvas.getContext('2d');
+        const statusBar = document.getElementById('status-bar');
+
+        // Simulated AR Bounding Box data (In production, replace this with your model output)
+        let mockBox = {
+            x: 100, y: 200, width: 220, height: 140,
+            label: "Truck #842 | Plate: ABC-1234",
+            vx: 1.5 // movement velocity for simulation
+        };
+
+        async function startCamera() {
+            try {
+                // Request back camera ('environment') optimized for mobile
+                const constraints = {
+                    video: {
+                        facingMode: 'environment',
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 }
+                    },
+                    audio: false
+                };
+
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                video.srcObject = stream;
+
+                video.onloadedmetadata = () => {
+                    video.play();
+                    resizeCanvas();
+                    statusBar.innerText = "AR Tracking Active";
+                    requestAnimationFrame(renderARLoop);
+                };
+            } catch (err) {
+                console.error("Camera access error:", err);
+                // Shows the exact error on screen if permissions or secure context fail
+                statusBar.innerText = `Error: ${err.name} - ${err.message}`;
+            }
+        }
+
+        // Ensure canvas internal resolution matches display size
+        function resizeCanvas() {
+            canvas.width = video.videoWidth || window.innerWidth;
+            canvas.height = video.videoHeight || window.innerHeight;
+        }
+
+        window.addEventListener('resize', resizeCanvas);
+
+        // Main Render & AR Loop
+        function renderARLoop() {
+            // 1. Clear the previous frame
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // 2. Simulate slight movement of the tracked object across frames
+            mockBox.x += mockBox.vx;
+            if (mockBox.x < 50 || mockBox.x > canvas.width - 300) {
+                mockBox.vx *= -1; // Reverse direction
+            }
+
+            // 3. Draw AR Bounding Box
+            ctx.strokeStyle = '#00FF66'; // Neon green AR look
+            ctx.lineWidth = 4;
+            ctx.strokeRect(mockBox.x, mockBox.y, mockBox.width, mockBox.height);
+
+            // 4. Draw Corner Accents for a high-tech HUD effect
+            drawHUDCorners(mockBox.x, mockBox.y, mockBox.width, mockBox.height);
+
+            // 5. Draw Label Background & Text
+            ctx.fillStyle = 'rgba(0, 255, 102, 0.85)';
+            const textWidth = ctx.measureText(mockBox.label).width + 20;
+            ctx.fillRect(mockBox.x, mockBox.y - 32, textWidth, 30);
+
+            ctx.fillStyle = '#000000';
+            ctx.font = 'bold 14px sans-serif';
+            ctx.fillText(mockBox.label, mockBox.x + 10, mockBox.y - 12);
+
+            // 6. Loop next frame
+            requestAnimationFrame(renderARLoop);
+        }
+
+        // Helper function for futuristic HUD corners
+        function drawHUDCorners(x, y, w, h) {
+            const len = 15;
+            ctx.strokeStyle = '#FFFFFF';
+            ctx.lineWidth = 3;
+
+            // Top-left
+            ctx.beginPath(); ctx.moveTo(x, y + len); ctx.lineTo(x, y); ctx.lineTo(x + len, y); ctx.stroke();
+            // Top-right
+            ctx.beginPath(); ctx.moveTo(x + w - len, y); ctx.lineTo(x + w, y); ctx.lineTo(x + w, y + len); ctx.stroke();
+            // Bottom-left
+            ctx.beginPath(); ctx.moveTo(x, y + h - len); ctx.lineTo(x, y + h); ctx.lineTo(x + len, y + h); ctx.stroke();
+            // Bottom-right
+            ctx.beginPath(); ctx.moveTo(x + w - len, y + h); ctx.lineTo(x + w, y + h); ctx.lineTo(x + w, y + h - len); ctx.stroke();
+        }
+
+        // Start everything on page load
+        window.addEventListener('load', startCamera);
+    </script>
+</body>
+</html>
