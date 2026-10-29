@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>LOGIX AR Vision - Precision Tracker</title>
+    <!-- Include mp4-muxer for true browser-side MP4 generation -->
+    <script src="https://cdn.jsdelivr.net/npm/mp4-muxer@5.1.2/build/mp4-muxer.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body, html { width: 100%; height: 100%; overflow: hidden; background: #080C10; font-family: system-ui, -apple-system, sans-serif; color: #E2E8F0; }
@@ -87,11 +89,11 @@
         const exportBtn = document.getElementById('export-btn');
 
         let trackingData = null;
-        let mediaRecorder = null;
-        let recordedChunks = [];
         let isRecording = false;
+        let muxer = null;
+        let videoEncoder = null;
+        let recordingInterval = null;
 
-        // Fetch the newly updated tracks.json keyframe file
         fetch('tracks.json')
             .then(res => res.json())
             .then(data => { trackingData = data; })
@@ -115,27 +117,17 @@
             return { x: rx, y: ry, w: rw, h: rh };
         }
 
-        // --- Smooth Keyframe Interpolation Engine ---
         function getTrackDataForTime(array, currentTime) {
             if (!array || array.length === 0) return null;
-            
-            // Find surrounding keyframes for smooth linear interpolation
             let k1 = array[0], k2 = array[array.length - 1];
-            
             if (currentTime <= k1.t) return k1.offscreen ? null : k1;
             if (currentTime >= k2.t) return k2.offscreen ? null : k2;
-
             for (let i = 0; i < array.length - 1; i++) {
                 if (currentTime >= array[i].t && currentTime <= array[i+1].t) {
-                    k1 = array[i];
-                    k2 = array[i+1];
-                    break;
+                    k1 = array[i]; k2 = array[i+1]; break;
                 }
             }
-
             if (k1.offscreen || k2.offscreen) return null;
-
-            // Linear interpolation factor between keyframes
             const factor = (currentTime - k1.t) / (k2.t - k1.t);
             return {
                 x: k1.box[0] + factor * (k2.box[0] - k1.box[0]),
@@ -154,18 +146,10 @@
 
             ctx.strokeStyle = color; 
             ctx.lineWidth = 2.5;
-            
-            // Handle partial visibility with dashed tactical border
-            if (box.partial) {
-                ctx.setLineDash([6, 4]);
-            } else {
-                ctx.setLineDash([]);
-            }
-            
+            ctx.setLineDash(box.partial ? [6, 4] : []);
             ctx.strokeRect(x, y, w, h);
-            ctx.setLineDash([]); // Reset line dash
+            ctx.setLineDash([]);
 
-            // Corner bracket accents
             const len = 12; 
             ctx.strokeStyle = '#FFF'; 
             ctx.lineWidth = 3;
@@ -174,7 +158,6 @@
             ctx.beginPath(); ctx.moveTo(x, y + h - len); ctx.lineTo(x, y + h); ctx.lineTo(x + len, y + h); ctx.stroke();
             ctx.beginPath(); ctx.moveTo(x + w - len, y + h); ctx.lineTo(x + w, y + h); ctx.lineTo(x + w, y + h - len); ctx.stroke();
 
-            // Telemetry Label Header
             ctx.fillStyle = color; 
             ctx.fillRect(x, y - 26, 130, 22);
             ctx.fillStyle = '#000'; 
@@ -212,58 +195,89 @@
             requestAnimationFrame(renderLoop);
         }
 
+        // --- True MP4 Muxer Recording Pipeline ---
         function toggleRecord() {
             if (!isRecording) { startRecording(); } else { stopRecording(); }
         }
 
-        function startRecording() {
-            recordedChunks = [];
+        async function startRecording() {
+            isRecording = true;
+            exportBtn.innerText = "STOP & SAVE MP4";
+            exportBtn.classList.add("recording");
+
             const exportCanvas = document.createElement('canvas');
             exportCanvas.width = 480;
             exportCanvas.height = 854;
             const exportCtx = exportCanvas.getContext('2d');
-            const stream = exportCanvas.captureStream(30);
-            
-            let options = { mimeType: 'video/webm;codecs=vp9', bitsPerSecond: 1200000 };
-            if (!MediaRecorder.isTypeSupported(options.mimeType)) {
-                options = { mimeType: 'video/webm' };
-            }
 
-            mediaRecorder = new MediaRecorder(stream, options);
-            mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordedChunks.push(e.data); };
-            mediaRecorder.onstop = saveVideo;
+            muxer = new Mp4Muxer.Muxer({
+                target: new Mp4Muxer.ArrayBufferTarget(),
+                video: {
+                    codec: 'avc',
+                    width: 480,
+                    height: 854
+                },
+                fastStart: 'in-memory'
+            });
 
-            function drawComposite() {
+            videoEncoder = new VideoEncoder({
+                output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+                error: e => console.error(e)
+            });
+
+            videoEncoder.configure({
+                codec: 'avc1.64002a',
+                width: 480,
+                height: 854,
+                bitrate: 1_200_000,
+                framerate: 30
+            });
+
+            video.currentTime = 0;
+            await video.play();
+
+            let frameIndex = 0;
+            const fps = 30;
+
+            recordingInterval = setInterval(async () => {
                 if (!isRecording) return;
                 exportCtx.drawImage(video, 0, 0, exportCanvas.width, exportCanvas.height);
                 exportCtx.drawImage(canvas, 0, 0, exportCanvas.width, exportCanvas.height);
-                requestAnimationFrame(drawComposite);
-            }
 
-            mediaRecorder.start();
-            isRecording = true;
-            exportBtn.innerText = "STOP & SAVE";
-            exportBtn.classList.add("recording");
-            
-            video.currentTime = 0;
-            video.play();
-            drawComposite();
+                const frame = new VideoFrame(exportCanvas, {
+                    timestamp: (frameIndex * 1e6) / fps
+                });
+
+                videoEncoder.encode(frame, { keyFrame: frameIndex % 30 === 0 });
+                frame.close();
+                frameIndex++;
+
+                if (video.ended) {
+                    stopRecording();
+                }
+            }, 1000 / fps);
         }
 
-        function stopRecording() {
+        async function stopRecording() {
+            if (!isRecording) return;
             isRecording = false;
-            mediaRecorder.stop();
+            clearInterval(recordingInterval);
+            video.pause();
+
             exportBtn.innerText = "EXPORT MP4";
             exportBtn.classList.remove("recording");
-        }
 
-        function saveVideo() {
-            const blob = new Blob(recordedChunks, { type: 'video/webm' });
+            await videoEncoder.flush();
+            muxer.finalize();
+
+            const buffer = muxer.target.buffer;
+            const blob = new Blob([buffer], { type: 'video/mp4' });
             const url = URL.createObjectURL(blob);
+            
             const a = document.createElement('a');
             a.style.display = 'none';
             a.href = url;
-            a.download = `AR_Logistics_Output_${Date.now()}.webm`;
+            a.download = `AR_Logistics_Output_${Date.now()}.mp4`;
             document.body.appendChild(a);
             a.click();
             setTimeout(() => { document.body.removeChild(a); window.URL.revokeObjectURL(url); }, 100);
