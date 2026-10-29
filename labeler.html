@@ -6,27 +6,30 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no"> 
     <style>
         body { font-family: system-ui, sans-serif; background: #0F172A; color: #F8FAFC; margin: 0; padding: 10px; display: flex; flex-direction: column; gap: 10px; }
-        #app-viewport { display: flex; gap: 10px; width: 100%; }
-        #canvas-container { position: relative; border: 2px solid #38BDF8; display: inline-block; flex-shrink: 0; }
+        #app-viewport { display: flex; gap: 12px; width: 100%; }
+        #canvas-container { position: relative; border: 2px solid #38BDF8; display: inline-block; flex-shrink: 0; border-radius: 8px; overflow: hidden; }
         canvas { display: block; cursor: crosshair; touch-action: none; }
-        #controls { flex: 1; background: #1E293B; padding: 10px; border-radius: 8px; display: flex; flex-direction: column; gap: 10px; }
+        #controls { flex: 1; background: #1E293B; padding: 12px; border-radius: 8px; display: flex; flex-direction: column; gap: 10px; }
         button { background: #0284C7; color: white; border: none; padding: 10px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 14px; }
         button:hover { background: #0369A1; }
         .target-btn { display: flex; gap: 8px; }
         .target-btn button { flex: 1; opacity: 0.6; }
         .target-btn button.active { opacity: 1.0; border: 2px solid #FFF; }
-        pre { background: #0F172A; padding: 8px; border-radius: 6px; font-size: 10px; max-height: 150px; overflow-y: auto; color: #81E6D9; }
+        .nav-bar { display: flex; gap: 8px; align-items: center; }
+        .nav-bar button { flex: 1; background: #334155; }
+        .nav-bar button:active { background: #475569; }
+        #status-badge { padding: 6px 10px; border-radius: 6px; font-size: 11px; font-weight: bold; text-align: center; }
+        .status-saved { background: rgba(16, 185, 129, 0.2); color: #10B981; border: 1px solid #10B981; }
+        .status-unsaved { background: rgba(245, 158, 11, 0.2); color: #F59E0B; border: 1px solid #F59E0B; }
+        pre { background: #0F172A; padding: 8px; border-radius: 6px; font-size: 10px; max-height: 120px; overflow-y: auto; color: #81E6D9; }
         
         @media (max-width: 768px) {
             #app-viewport { flex-direction: column; align-items: center; }
-            #canvas-container { order: 1; }
-            #controls { order: 2; width: 100%; max-width: 500px; }
         }
     </style>
 </head>
 <body>
 
-    <!-- DOM-attached video element required for iOS Safari frame decoding -->
     <video id="sourceVideo" src="15969738_540_960_30fps.mp4" crossorigin="anonymous" playsinline preload="auto" style="display:none;"></video>
 
     <div id="app-viewport">
@@ -36,9 +39,19 @@
 
         <div id="controls">
             <h3>AR Tracker Calibrator</h3>
+            
+            <!-- Frame Status Indicator -->
+            <div id="status-badge" class="status-unsaved">UNSAVED / NEW FRAME</div>
+
             <div>
-                <label>Video Time (s): <span id="timeVal">0.00</span></label>
-                <input type="range" id="timeSlider" min="0" max="22" step="0.5" value="0" style="width:100%;">
+                <label>Video Time (s): <span id="timeVal" style="font-weight:bold; color:#38BDF8;">0.00</span></label>
+                <input type="range" id="timeSlider" min="0" max="22" step="0.5" value="0" style="width:100%; margin-top:4px;">
+            </div>
+
+            <!-- Suggestion 1: Quick Next / Previous 0.5s Step Bar with Auto-Save -->
+            <div class="nav-bar">
+                <button onclick="stepTime(-0.5)">◀ Prev 0.5s</button>
+                <button onclick="stepTime(0.5)" style="background:#0284C7;">Next 0.5s ▶</button>
             </div>
 
             <div class="target-btn">
@@ -46,13 +59,13 @@
                 <button id="btnTruck" onclick="selectTarget('truck')" style="background:#0284C7;">Truck Cab</button>
             </div>
 
-            <label><input type="checkbox" id="partialCheck"> Partially Visible / Edge Cropped</label>
-            <label><input type="checkbox" id="offscreenCheck"> Off-Screen (Hide Box)</label>
+            <label><input type="checkbox" id="partialCheck" onchange="updateBoxState()"> Partially Visible / Edge Cropped</label>
+            <label><input type="checkbox" id="offscreenCheck" onchange="updateBoxState()"> Off-Screen (Hide Box)</label>
 
-            <button onclick="saveCurrentKeyframe()">Set Control Keyframe</button>
-            <button onclick="exportJSON()" style="background:#059669;">Export Control JSON</button>
+            <button onclick="saveCurrentKeyframe()" style="background:#059669;">Manual Save Keyframe</button>
+            <button onclick="exportJSON()" style="background:#D97706;">Export Control JSON</button>
 
-            <h4>Keyframes Recorded:</h4>
+            <h4>Recorded Keyframes Summary:</h4>
             <pre id="jsonPreview">{}</pre>
         </div>
     </div>
@@ -63,38 +76,87 @@
         const ctx = canvas.getContext('2d');
         const timeSlider = document.getElementById('timeSlider');
         const timeVal = document.getElementById('timeVal');
+        const statusBadge = document.getElementById('status-badge');
 
         let currentTarget = 'container';
         let keyframes = { container: [], truck: [] };
         
         let activeBoxes = {
-            container: { x: 0.38, y: 0.26, w: 0.31, h: 0.24, partial: true, offscreen: false },
-            truck: { x: 0.03, y: 0.34, w: 0.22, h: 0.30, partial: true, offscreen: false }
+            container: { x: 0.38, y: 0.26, w: 0.31, h: 0.24, partial: false, offscreen: false },
+            truck: { x: 0.03, y: 0.34, w: 0.22, h: 0.30, partial: false, offscreen: true }
         };
 
         let draggingCorner = null;
-        const cornerSize = 20; 
+        const cornerSize = 22; 
 
         video.addEventListener('loadedmetadata', () => {
             const scaleFactor = 0.5;
             canvas.width = video.videoWidth * scaleFactor;
             canvas.height = video.videoHeight * scaleFactor;
             timeSlider.max = video.duration;
-            video.currentTime = 0.1; // Force frame load
+            video.currentTime = 0.0;
         });
 
-        video.addEventListener('seeked', renderFrame);
+        video.addEventListener('seeked', () => {
+            checkFrameSavedStatus();
+            syncCheckboxesToCurrentTarget();
+            renderFrame();
+        });
 
         timeSlider.addEventListener('input', (e) => {
-            video.currentTime = e.target.value;
-            timeVal.innerText = parseFloat(e.target.value).toFixed(2);
+            video.currentTime = parseFloat(e.target.value);
+            timeVal.innerText = video.currentTime.toFixed(2);
         });
+
+        // Suggestion 1: Step forward/backward with auto-save feature
+        function stepTime(delta) {
+            // Auto-save current frame before jumping
+            saveCurrentKeyframeSilent();
+
+            let newTime = video.currentTime + delta;
+            newTime = Math.max(0, Math.min(video.duration, newTime));
+            // Snap to nearest 0.5s
+            newTime = Math.round(newTime * 2) / 2;
+
+            timeSlider.value = newTime;
+            video.currentTime = newTime;
+            timeVal.innerText = newTime.toFixed(2);
+        }
 
         function selectTarget(target) {
             currentTarget = target;
             document.getElementById('btnContainer').classList.toggle('active', target === 'container');
             document.getElementById('btnTruck').classList.toggle('active', target === 'truck');
+            syncCheckboxesToCurrentTarget();
             renderFrame();
+        }
+
+        function updateBoxState() {
+            const box = activeBoxes[currentTarget];
+            box.partial = document.getElementById('partialCheck').checked;
+            box.offscreen = document.getElementById('offscreenCheck').checked;
+            renderFrame();
+        }
+
+        function syncCheckboxesToCurrentTarget() {
+            const box = activeBoxes[currentTarget];
+            document.getElementById('partialCheck').checked = box.partial;
+            document.getElementById('offscreenCheck').checked = box.offscreen;
+        }
+
+        // Suggestion 2: Indicator to check if frame is already handled
+        function checkFrameSavedStatus() {
+            const t = parseFloat(video.currentTime.toFixed(2));
+            const cFound = keyframes.container.some(k => Math.abs(k.t - t) < 0.1);
+            const tFound = keyframes.truck.some(k => Math.abs(k.t - t) < 0.1);
+
+            if (cFound || tFound) {
+                statusBadge.className = "status-saved";
+                statusBadge.innerText = `✓ HANDLED (Saved in Keyframes)`;
+            } else {
+                statusBadge.className = "status-unsaved";
+                statusBadge.innerText = `⚠️ PENDING (Not Saved Yet)`;
+            }
         }
 
         function renderFrame() {
@@ -113,7 +175,9 @@
 
                 ctx.strokeStyle = color;
                 ctx.lineWidth = target === currentTarget ? 3 : 1.5;
+                ctx.setLineDash(box.partial ? [6, 4] : []);
                 ctx.strokeRect(bx, by, bw, bh);
+                ctx.setLineDash([]);
 
                 if (target === currentTarget) {
                     ctx.fillStyle = '#FFFFFF';
@@ -131,6 +195,9 @@
 
         function handleStart(e) {
             e.preventDefault();
+            const box = activeBoxes[currentTarget];
+            if (box.offscreen) return;
+
             let touchX, touchY;
             if (e.touches) {
                 const rect = canvas.getBoundingClientRect();
@@ -141,13 +208,12 @@
                 touchY = e.offsetY;
             }
 
-            const box = activeBoxes[currentTarget];
             const bx = box.x * canvas.width;
             const by = box.y * canvas.height;
             const bw = box.w * canvas.width;
             const bh = box.h * canvas.height;
             
-            const touchTolerance = cornerSize / 2 + 5;
+            const touchTolerance = cornerSize / 2 + 10;
             if (Math.hypot(touchX - bx, touchY - by) < touchTolerance) draggingCorner = 'tl';
             else if (Math.hypot(touchX - (bx + bw), touchY - by) < touchTolerance) draggingCorner = 'tr';
             else if (Math.hypot(touchX - bx, touchY - (by + bh)) < touchTolerance) draggingCorner = 'bl';
@@ -198,32 +264,41 @@
         canvas.addEventListener('mousemove', handleMove);
         window.addEventListener('mouseup', handleEnd);
 
-        function saveCurrentKeyframe() {
+        function saveCurrentKeyframeSilent() {
             const t = parseFloat(video.currentTime.toFixed(2));
-            const box = activeBoxes[currentTarget];
-            box.partial = document.getElementById('partialCheck').checked;
-            box.offscreen = document.getElementById('offscreenCheck').checked;
+            ['container', 'truck'].forEach(target => {
+                const box = activeBoxes[target];
+                const list = keyframes[target];
+                const existingIdx = list.findIndex(k => Math.abs(k.t - t) < 0.1);
+                
+                const kData = {
+                    t: t,
+                    box: [round(box.x), round(box.y), round(box.w), round(box.h)],
+                    partial: box.partial,
+                    offscreen: box.offscreen
+                };
 
-            const list = keyframes[currentTarget];
-            const existingIdx = list.findIndex(k => Math.abs(k.t - t) < 0.1);
-            
-            const kData = {
-                t: t,
-                box: [round(box.x), round(box.y), round(box.w), round(box.h)],
-                partial: box.partial,
-                offscreen: box.offscreen
-            };
+                if (existingIdx >= 0) list[existingIdx] = kData;
+                else list.push(kData);
+                list.sort((a, b) => a.t - b.t);
+            });
+            updateJSONPreview();
+        }
 
-            if (existingIdx >= 0) list[existingIdx] = kData;
-            else list.push(kData);
+        function saveCurrentKeyframe() {
+            saveCurrentKeyframeSilent();
+            checkFrameSavedStatus();
+            alert("Keyframe saved successfully for t = " + video.currentTime.toFixed(2) + "s!");
+        }
 
-            list.sort((a, b) => a.t - b.t);
+        function updateJSONPreview() {
             document.getElementById('jsonPreview').innerText = JSON.stringify(keyframes, null, 2);
         }
 
         function round(val) { return Math.round(val * 1000) / 1000; }
 
         function exportJSON() {
+            saveCurrentKeyframeSilent();
             const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(keyframes, null, 2));
             const a = document.createElement('a');
             a.href = dataStr;
