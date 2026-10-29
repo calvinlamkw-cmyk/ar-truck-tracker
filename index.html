@@ -23,7 +23,6 @@
         #top-bar { position: absolute; top: 16px; left: 16px; background: rgba(15, 23, 42, 0.8); backdrop-filter: blur(8px); padding: 8px 14px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1); font-size: 12px; z-index: 10; display: flex; gap: 12px; align-items: center; }
         .dot { width: 8px; height: 8px; border-radius: 50%; background: #10B981; box-shadow: 0 0 8px #10B981; }
         
-        /* Export Button Styling */
         #export-btn {
             background: #0284C7;
             color: #FFF;
@@ -47,7 +46,7 @@
             <div id="top-bar">
                 <div style="display:flex; align-items:center; gap:6px;"><span class="dot"></span> AR VISION OCR</div>
                 <div id="time-display">00:00</div>
-                <button id="export-btn" onclick="toggleRecord()">RECORD & EXPORT</button>
+                <button id="export-btn" onclick="toggleRecord()">EXPORT MP4</button>
             </div>
             <video id="webcam" src="15969738_540_960_30fps.mp4" autoplay playsinline muted loop crossorigin="anonymous"></video>
             <canvas id="overlay-canvas"></canvas>
@@ -92,13 +91,9 @@
         let recordedChunks = [];
         let isRecording = false;
 
-        // Fetch pre-computed AI tracks JSON
         fetch('tracks.json')
             .then(res => res.json())
-            .then(data => {
-                trackingData = data;
-                console.log("AI Tracking Data Loaded Successfully!");
-            })
+            .then(data => { trackingData = data; })
             .catch(err => console.error("Error loading tracks.json:", err));
 
         function resizeCanvas() {
@@ -125,10 +120,7 @@
             let minDiff = Math.abs(closest.t - currentTime);
             for (let i = 1; i < array.length; i++) {
                 let diff = Math.abs(array[i].t - currentTime);
-                if (diff < minDiff) {
-                    minDiff = diff;
-                    closest = array[i];
-                }
+                if (diff < minDiff) { minDiff = diff; closest = array[i]; }
             }
             return minDiff < 0.25 ? closest : null;
         }
@@ -143,7 +135,6 @@
             ctx.lineWidth = 2.5; 
             ctx.strokeRect(x, y, w, h);
 
-            // HUD Corner Brackets
             const len = 12; 
             ctx.strokeStyle = '#FFF'; 
             ctx.lineWidth = 3;
@@ -152,7 +143,6 @@
             ctx.beginPath(); ctx.moveTo(x, y + h - len); ctx.lineTo(x, y + h); ctx.lineTo(x + len, y + h); ctx.stroke();
             ctx.beginPath(); ctx.moveTo(x + w - len, y + h); ctx.lineTo(x + w, y + h); ctx.lineTo(x + w, y + h - len); ctx.stroke();
 
-            // Floating Label Banner
             ctx.fillStyle = color; 
             ctx.fillRect(x, y - 26, 130, 22);
             ctx.fillStyle = '#000'; 
@@ -190,27 +180,32 @@
             requestAnimationFrame(renderLoop);
         }
 
-        // --- Native Video Recording & Export Pipeline ---
+        // --- Optimized MP4 Recording & Export Pipeline ---
         function toggleRecord() {
-            if (!isRecording) {
-                startRecording();
-            } else {
-                stopRecording();
-            }
+            if (!isRecording) { startRecording(); } else { stopRecording(); }
         }
 
         function startRecording() {
             recordedChunks = [];
             
-            // Create a composite offscreen canvas that merges the video frame + HUD overlay
+            // Scaled export resolution (480x854) for smaller file size with excellent clarity
             const exportCanvas = document.createElement('canvas');
-            exportCanvas.width = video.videoWidth || 540;
-            exportCanvas.height = video.videoHeight || 960;
+            exportCanvas.width = 480;
+            exportCanvas.height = 854;
             const exportCtx = exportCanvas.getContext('2d');
 
             const stream = exportCanvas.captureStream(30);
-            mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+            
+            // Prioritize MP4 container format with optimized bitrate (1.2 Mbps) for lightweight files
+            let options = { mimeType: 'video/mp4;codecs=avc1', bitsPerSecond: 1200000 };
+            if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+                options = { mimeType: 'video/mp4', bitsPerSecond: 1200000 };
+                if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+                    options = { mimeType: 'video/webm;codecs=vp9', bitsPerSecond: 1200000 };
+                }
+            }
 
+            mediaRecorder = new MediaRecorder(stream, options);
             mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordedChunks.push(e.data); };
             mediaRecorder.onstop = saveVideo;
 
@@ -223,10 +218,9 @@
 
             mediaRecorder.start();
             isRecording = true;
-            exportBtn.innerText = "STOP & SAVE";
+            exportBtn.innerText = "STOP & SAVE MP4";
             exportBtn.classList.add("recording");
             
-            // Restart video to capture full playback sequence
             video.currentTime = 0;
             video.play();
             drawComposite();
@@ -235,17 +229,20 @@
         function stopRecording() {
             isRecording = false;
             mediaRecorder.stop();
-            exportBtn.innerText = "RECORD & EXPORT";
+            exportBtn.innerText = "EXPORT MP4";
             exportBtn.classList.remove("recording");
         }
 
         function saveVideo() {
-            const blob = new Blob(recordedChunks, { type: 'video/webm' });
+            const mimeType = mediaRecorder.mimeType.includes('mp4') ? 'video/mp4' : 'video/webm';
+            const extension = mimeType.includes('mp4') ? 'mp4' : 'webm';
+            
+            const blob = new Blob(recordedChunks, { type: mimeType });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.style.display = 'none';
             a.href = url;
-            a.download = `AR_Logistics_Output_${Date.now()}.webm`;
+            a.download = `AR_Logistics_Output_${Date.now()}.${extension}`;
             document.body.appendChild(a);
             a.click();
             setTimeout(() => { document.body.removeChild(a); window.URL.revokeObjectURL(url); }, 100);
