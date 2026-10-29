@@ -2,309 +2,275 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>AR Vision - Interactive Bounding Box Calibrator</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no"> 
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>LOGIX AR Vision - Precision Tracker</title>
     <style>
-        body { font-family: system-ui, sans-serif; background: #0F172A; color: #F8FAFC; margin: 0; padding: 10px; display: flex; flex-direction: column; gap: 10px; }
-        #app-viewport { display: flex; gap: 12px; width: 100%; }
-        #canvas-container { position: relative; border: 2px solid #38BDF8; display: inline-block; flex-shrink: 0; border-radius: 8px; overflow: hidden; }
-        canvas { display: block; cursor: crosshair; touch-action: none; }
-        #controls { flex: 1; background: #1E293B; padding: 12px; border-radius: 8px; display: flex; flex-direction: column; gap: 10px; }
-        button { background: #0284C7; color: white; border: none; padding: 10px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 14px; }
-        button:hover { background: #0369A1; }
-        .target-btn { display: flex; gap: 8px; }
-        .target-btn button { flex: 1; opacity: 0.6; }
-        .target-btn button.active { opacity: 1.0; border: 2px solid #FFF; }
-        .nav-bar { display: flex; gap: 8px; align-items: center; }
-        .nav-bar button { flex: 1; background: #334155; }
-        .nav-bar button:active { background: #475569; }
-        #status-badge { padding: 6px 10px; border-radius: 6px; font-size: 11px; font-weight: bold; text-align: center; }
-        .status-saved { background: rgba(16, 185, 129, 0.2); color: #10B981; border: 1px solid #10B981; }
-        .status-unsaved { background: rgba(245, 158, 11, 0.2); color: #F59E0B; border: 1px solid #F59E0B; }
-        pre { background: #0F172A; padding: 8px; border-radius: 6px; font-size: 10px; max-height: 120px; overflow-y: auto; color: #81E6D9; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body, html { width: 100%; height: 100%; overflow: hidden; background: #080C10; font-family: system-ui, -apple-system, sans-serif; color: #E2E8F0; }
+        #app-viewport { display: flex; width: 100vw; height: 100vh; }
+        #video-container { position: relative; flex: 1; height: 100%; background: #000; display: flex; align-items: center; justify-content: center; }
+        #webcam { width: 100%; height: 100%; object-fit: contain; }
+        #overlay-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; }
+        #side-panel { width: 380px; height: 100%; background: #0F172A; border-left: 1px solid rgba(255, 255, 255, 0.1); display: flex; flex-direction: column; padding: 20px; gap: 16px; z-index: 10; overflow-y: auto; }
+        .panel-header { font-size: 14px; font-weight: 700; color: #38BDF8; padding-bottom: 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.1); display: flex; justify-content: space-between; align-items: center; }
+        .badge { font-size: 10px; padding: 3px 8px; border-radius: 12px; font-weight: 600; text-transform: uppercase; background: rgba(16, 185, 129, 0.2); color: #10B981; border: 1px solid rgba(16, 185, 129, 0.4); }
+        .card { display: none; background: rgba(30, 41, 59, 0.9); border: 1px solid rgba(56, 189, 248, 0.4); border-radius: 12px; padding: 16px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4); }
+        .card.active { display: block; }
+        .card-title { font-size: 11px; color: #94A3B8; margin-bottom: 6px; display: flex; justify-content: space-between; }
+        .card-main-val { font-size: 18px; font-weight: 700; font-family: monospace; color: #F8FAFC; margin-bottom: 10px; }
+        .card-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 11px; }
+        .data-label { color: #64748B; } .data-val { color: #CBD5E1; font-weight: 600; }
+        #top-bar { position: absolute; top: 16px; left: 16px; background: rgba(15, 23, 42, 0.8); backdrop-filter: blur(8px); padding: 8px 14px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1); font-size: 12px; z-index: 10; display: flex; gap: 12px; align-items: center; }
+        .dot { width: 8px; height: 8px; border-radius: 50%; background: #10B981; box-shadow: 0 0 8px #10B981; }
         
-        @media (max-width: 768px) {
-            #app-viewport { flex-direction: column; align-items: center; }
+        #export-btn {
+            background: #0284C7;
+            color: #FFF;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+            margin-left: 8px;
         }
+        #export-btn:hover { background: #0369A1; }
+        #export-btn.recording { background: #EF4444; animation: pulse 1s infinite; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.6; } 100% { opacity: 1; } }
     </style>
 </head>
 <body>
-
-    <video id="sourceVideo" src="15969738_540_960_30fps.mp4" crossorigin="anonymous" playsinline preload="auto" style="display:none;"></video>
-
     <div id="app-viewport">
-        <div id="canvas-container">
-            <canvas id="editorCanvas"></canvas>
+        <div id="video-container">
+            <div id="top-bar">
+                <div style="display:flex; align-items:center; gap:6px;"><span class="dot"></span> AR VISION OCR</div>
+                <div id="time-display">00:00</div>
+                <button id="export-btn" onclick="toggleRecord()">EXPORT MP4</button>
+            </div>
+            <video id="webcam" src="15969738_540_960_30fps.mp4" autoplay playsinline muted loop crossorigin="anonymous"></video>
+            <canvas id="overlay-canvas"></canvas>
         </div>
 
-        <div id="controls">
-            <h3>AR Tracker Calibrator</h3>
+        <div id="side-panel">
+            <div class="panel-header">CONTAINER YARD TELEMETRY <span class="badge">AI SYNCED</span></div>
             
-            <!-- Frame Status Indicator -->
-            <div id="status-badge" class="status-unsaved">UNSAVED / NEW FRAME</div>
-
-            <div>
-                <label>Video Time (s): <span id="timeVal" style="font-weight:bold; color:#38BDF8;">0.00</span></label>
-                <input type="range" id="timeSlider" min="0" max="22" step="0.5" value="0" style="width:100%; margin-top:4px;">
+            <div id="container-card" class="card">
+                <div class="card-title"><span>CONTAINER IDENTIFIER</span><span style="color:#10B981;">TRACKED</span></div>
+                <div class="card-main-val">EGSU 021124 8</div>
+                <div class="card-grid">
+                    <div><span class="data-label">OPERATOR:</span> <span class="data-val">EVERGREEN</span></div>
+                    <div><span class="data-label">TYPE:</span> <span class="data-val">22G1 (20FT)</span></div>
+                    <div><span class="data-label">COLOR:</span> <span class="data-val">GREEN</span></div>
+                    <div><span class="data-label">OCR CONF:</span> <span class="data-val">98.4%</span></div>
+                </div>
             </div>
 
-            <!-- Suggestion 1: Quick Next / Previous 0.5s Step Bar with Auto-Save -->
-            <div class="nav-bar">
-                <button onclick="stepTime(-0.5)">◀ Prev 0.5s</button>
-                <button onclick="stepTime(0.5)" style="background:#0284C7;">Next 0.5s ▶</button>
+            <div id="truck-card" class="card">
+                <div class="card-title"><span>PRIME MOVER FLEET</span><span style="color:#00E5FF;">TRACKED</span></div>
+                <div class="card-main-val">SLA 01</div>
+                <div class="card-grid">
+                    <div><span class="data-label">MODEL:</span> <span class="data-val">SCANIA R-SERIES</span></div>
+                    <div><span class="data-label">STATUS:</span> <span class="data-val">IN TRANSIT</span></div>
+                    <div><span class="data-label">DEST:</span> <span class="data-val">YARD ZONE B</span></div>
+                    <div><span class="data-label">SPEED:</span> <span class="data-val">12 KM/H</span></div>
+                </div>
             </div>
-
-            <div class="target-btn">
-                <button id="btnContainer" class="active" onclick="selectTarget('container')" style="background:#10B981;">Container</button>
-                <button id="btnTruck" onclick="selectTarget('truck')" style="background:#0284C7;">Truck Cab</button>
-            </div>
-
-            <label><input type="checkbox" id="partialCheck" onchange="updateBoxState()"> Partially Visible / Edge Cropped</label>
-            <label><input type="checkbox" id="offscreenCheck" onchange="updateBoxState()"> Off-Screen (Hide Box)</label>
-
-            <button onclick="saveCurrentKeyframe()" style="background:#059669;">Manual Save Keyframe</button>
-            <button onclick="exportJSON()" style="background:#D97706;">Export Control JSON</button>
-
-            <h4>Recorded Keyframes Summary:</h4>
-            <pre id="jsonPreview">{}</pre>
         </div>
     </div>
 
     <script>
-        const video = document.getElementById('sourceVideo');
-        const canvas = document.getElementById('editorCanvas');
+        const video = document.getElementById('webcam');
+        const canvas = document.getElementById('overlay-canvas');
         const ctx = canvas.getContext('2d');
-        const timeSlider = document.getElementById('timeSlider');
-        const timeVal = document.getElementById('timeVal');
-        const statusBadge = document.getElementById('status-badge');
+        const timeDisplay = document.getElementById('time-display');
+        const exportBtn = document.getElementById('export-btn');
 
-        let currentTarget = 'container';
-        let keyframes = { container: [], truck: [] };
-        
-        let activeBoxes = {
-            container: { x: 0.38, y: 0.26, w: 0.31, h: 0.24, partial: false, offscreen: false },
-            truck: { x: 0.03, y: 0.34, w: 0.22, h: 0.30, partial: false, offscreen: true }
-        };
+        let trackingData = null;
+        let mediaRecorder = null;
+        let recordedChunks = [];
+        let isRecording = false;
 
-        let draggingCorner = null;
-        const cornerSize = 22; 
+        // Fetch the newly updated tracks.json keyframe file
+        fetch('tracks.json')
+            .then(res => res.json())
+            .then(data => { trackingData = data; })
+            .catch(err => console.error("Error loading tracks.json:", err));
 
-        video.addEventListener('loadedmetadata', () => {
-            const scaleFactor = 0.5;
-            canvas.width = video.videoWidth * scaleFactor;
-            canvas.height = video.videoHeight * scaleFactor;
-            timeSlider.max = video.duration;
-            video.currentTime = 0.0;
-        });
-
-        video.addEventListener('seeked', () => {
-            checkFrameSavedStatus();
-            syncCheckboxesToCurrentTarget();
-            renderFrame();
-        });
-
-        timeSlider.addEventListener('input', (e) => {
-            video.currentTime = parseFloat(e.target.value);
-            timeVal.innerText = video.currentTime.toFixed(2);
-        });
-
-        // Suggestion 1: Step forward/backward with auto-save feature
-        function stepTime(delta) {
-            // Auto-save current frame before jumping
-            saveCurrentKeyframeSilent();
-
-            let newTime = video.currentTime + delta;
-            newTime = Math.max(0, Math.min(video.duration, newTime));
-            // Snap to nearest 0.5s
-            newTime = Math.round(newTime * 2) / 2;
-
-            timeSlider.value = newTime;
-            video.currentTime = newTime;
-            timeVal.innerText = newTime.toFixed(2);
+        function resizeCanvas() {
+            canvas.width = video.clientWidth;
+            canvas.height = video.clientHeight;
         }
 
-        function selectTarget(target) {
-            currentTarget = target;
-            document.getElementById('btnContainer').classList.toggle('active', target === 'container');
-            document.getElementById('btnTruck').classList.toggle('active', target === 'truck');
-            syncCheckboxesToCurrentTarget();
-            renderFrame();
+        window.addEventListener('resize', resizeCanvas);
+        video.addEventListener('loadedmetadata', resizeCanvas);
+
+        function getRenderedVideoRect() {
+            const vw = video.videoWidth || 540, vh = video.videoHeight || 960;
+            const cw = video.clientWidth, ch = video.clientHeight;
+            const vRatio = vw / vh, cRatio = cw / ch;
+            let rw, rh, rx, ry;
+            if (cRatio > vRatio) { rh = ch; rw = rh * vRatio; rx = (cw - rw) / 2; ry = 0; }
+            else { rw = cw; rh = rw / vRatio; rx = 0; ry = (ch - rh) / 2; }
+            return { x: rx, y: ry, w: rw, h: rh };
         }
 
-        function updateBoxState() {
-            const box = activeBoxes[currentTarget];
-            box.partial = document.getElementById('partialCheck').checked;
-            box.offscreen = document.getElementById('offscreenCheck').checked;
-            renderFrame();
-        }
-
-        function syncCheckboxesToCurrentTarget() {
-            const box = activeBoxes[currentTarget];
-            document.getElementById('partialCheck').checked = box.partial;
-            document.getElementById('offscreenCheck').checked = box.offscreen;
-        }
-
-        // Suggestion 2: Indicator to check if frame is already handled
-        function checkFrameSavedStatus() {
-            const t = parseFloat(video.currentTime.toFixed(2));
-            const cFound = keyframes.container.some(k => Math.abs(k.t - t) < 0.1);
-            const tFound = keyframes.truck.some(k => Math.abs(k.t - t) < 0.1);
-
-            if (cFound || tFound) {
-                statusBadge.className = "status-saved";
-                statusBadge.innerText = `✓ HANDLED (Saved in Keyframes)`;
-            } else {
-                statusBadge.className = "status-unsaved";
-                statusBadge.innerText = `⚠️ PENDING (Not Saved Yet)`;
-            }
-        }
-
-        function renderFrame() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        // --- Smooth Keyframe Interpolation Engine ---
+        function getTrackDataForTime(array, currentTime) {
+            if (!array || array.length === 0) return null;
             
-            ['container', 'truck'].forEach(target => {
-                const box = activeBoxes[target];
-                if (box.offscreen) return;
+            // Find surrounding keyframes for smooth linear interpolation
+            let k1 = array[0], k2 = array[array.length - 1];
+            
+            if (currentTime <= k1.t) return k1.offscreen ? null : k1;
+            if (currentTime >= k2.t) return k2.offscreen ? null : k2;
 
-                const color = target === 'container' ? '#10B981' : '#0284C7';
-                const bx = box.x * canvas.width;
-                const by = box.y * canvas.height;
-                const bw = box.w * canvas.width;
-                const bh = box.h * canvas.height;
-
-                ctx.strokeStyle = color;
-                ctx.lineWidth = target === currentTarget ? 3 : 1.5;
-                ctx.setLineDash(box.partial ? [6, 4] : []);
-                ctx.strokeRect(bx, by, bw, bh);
-                ctx.setLineDash([]);
-
-                if (target === currentTarget) {
-                    ctx.fillStyle = '#FFFFFF';
-                    ctx.strokeStyle = '#000000';
-                    ctx.lineWidth = 1;
-                    [[bx, by], [bx + bw, by], [bx, by + bh], [bx + bw, by + bh]].forEach(([cx, cy]) => {
-                        ctx.beginPath();
-                        ctx.arc(cx, cy, cornerSize/2, 0, Math.PI*2);
-                        ctx.fill();
-                        ctx.stroke();
-                    });
+            for (let i = 0; i < array.length - 1; i++) {
+                if (currentTime >= array[i].t && currentTime <= array[i+1].t) {
+                    k1 = array[i];
+                    k2 = array[i+1];
+                    break;
                 }
-            });
-        }
-
-        function handleStart(e) {
-            e.preventDefault();
-            const box = activeBoxes[currentTarget];
-            if (box.offscreen) return;
-
-            let touchX, touchY;
-            if (e.touches) {
-                const rect = canvas.getBoundingClientRect();
-                touchX = (e.touches[0].clientX - rect.left);
-                touchY = (e.touches[0].clientY - rect.top);
-            } else {
-                touchX = e.offsetX;
-                touchY = e.offsetY;
             }
 
-            const bx = box.x * canvas.width;
-            const by = box.y * canvas.height;
-            const bw = box.w * canvas.width;
-            const bh = box.h * canvas.height;
+            if (k1.offscreen || k2.offscreen) return null;
+
+            // Linear interpolation factor between keyframes
+            const factor = (currentTime - k1.t) / (k2.t - k1.t);
+            return {
+                x: k1.box[0] + factor * (k2.box[0] - k1.box[0]),
+                y: k1.box[1] + factor * (k2.box[1] - k1.box[1]),
+                w: k1.box[2] + factor * (k2.box[2] - k1.box[2]),
+                h: k1.box[3] + factor * (k2.box[3] - k1.box[3]),
+                partial: k1.partial || k2.partial
+            };
+        }
+
+        function drawHollowBox(box, color, label, sub, vRect) {
+            const x = vRect.x + (box.x * vRect.w);
+            const y = vRect.y + (box.y * vRect.h);
+            const w = box.w * vRect.w;
+            const h = box.h * vRect.h;
+
+            ctx.strokeStyle = color; 
+            ctx.lineWidth = 2.5;
             
-            const touchTolerance = cornerSize / 2 + 10;
-            if (Math.hypot(touchX - bx, touchY - by) < touchTolerance) draggingCorner = 'tl';
-            else if (Math.hypot(touchX - (bx + bw), touchY - by) < touchTolerance) draggingCorner = 'tr';
-            else if (Math.hypot(touchX - bx, touchY - (by + bh)) < touchTolerance) draggingCorner = 'bl';
-            else if (Math.hypot(touchX - (bx + bw), touchY - (by + bh)) < touchTolerance) draggingCorner = 'br';
-        }
-
-        function handleMove(e) {
-            if (!draggingCorner) return;
-            e.preventDefault();
-            
-            let touchX, touchY;
-            if (e.touches) {
-                const rect = canvas.getBoundingClientRect();
-                touchX = (e.touches[0].clientX - rect.left) / canvas.width;
-                touchY = (e.touches[0].clientY - rect.top) / canvas.height;
+            // Handle partial visibility with dashed tactical border
+            if (box.partial) {
+                ctx.setLineDash([6, 4]);
             } else {
-                touchX = e.offsetX / canvas.width;
-                touchY = e.offsetY / canvas.height;
+                ctx.setLineDash([]);
+            }
+            
+            ctx.strokeRect(x, y, w, h);
+            ctx.setLineDash([]); // Reset line dash
+
+            // Corner bracket accents
+            const len = 12; 
+            ctx.strokeStyle = '#FFF'; 
+            ctx.lineWidth = 3;
+            ctx.beginPath(); ctx.moveTo(x, y + len); ctx.lineTo(x, y); ctx.lineTo(x + len, y); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(x + w - len, y); ctx.lineTo(x + w, y); ctx.lineTo(x + w, y + len); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(x, y + h - len); ctx.lineTo(x, y + h); ctx.lineTo(x + len, y + h); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(x + w - len, y + h); ctx.lineTo(x + w, y + h); ctx.lineTo(x + w, y + h - len); ctx.stroke();
+
+            // Telemetry Label Header
+            ctx.fillStyle = color; 
+            ctx.fillRect(x, y - 26, 130, 22);
+            ctx.fillStyle = '#000'; 
+            ctx.font = 'bold 10px sans-serif'; 
+            ctx.fillText(label, x + 6, y - 12);
+            ctx.font = '8px sans-serif';
+            ctx.fillText(sub, x + 6, y - 3);
+        }
+
+        function renderLoop() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            const t = video.currentTime;
+            timeDisplay.innerText = `00:${Math.floor(t).toString().padStart(2, '0')}`;
+            const vRect = getRenderedVideoRect();
+
+            if (trackingData) {
+                const cTrack = getTrackDataForTime(trackingData.container, t);
+                const tTrack = getTrackDataForTime(trackingData.truck, t);
+
+                if (cTrack) {
+                    drawHollowBox(cTrack, '#00FF66', 'EGSU 021124 8', 'EVERGREEN 20FT', vRect);
+                    document.getElementById('container-card').classList.add('active');
+                } else {
+                    document.getElementById('container-card').classList.remove('active');
+                }
+
+                if (tTrack) {
+                    drawHollowBox(tTrack, '#00E5FF', 'TRUCK: SLA 01', 'SCANIA R-SERIES', vRect);
+                    document.getElementById('truck-card').classList.add('active');
+                } else {
+                    document.getElementById('truck-card').classList.remove('active');
+                }
             }
 
-            const box = activeBoxes[currentTarget];
-            const minSize = 0.05;
+            requestAnimationFrame(renderLoop);
+        }
 
-            if (draggingCorner === 'tl') {
-                const prevRight = box.x + box.w; const prevBottom = box.y + box.h;
-                box.x = Math.min(prevRight - minSize, touchX); box.y = Math.min(prevBottom - minSize, touchY);
-                box.w = prevRight - box.x; box.h = prevBottom - box.y;
-            } else if (draggingCorner === 'tr') {
-                const prevBottom = box.y + box.h;
-                box.w = Math.max(minSize, touchX - box.x); box.y = Math.min(prevBottom - minSize, touchY);
-                box.h = prevBottom - box.y;
-            } else if (draggingCorner === 'bl') {
-                const prevRight = box.x + box.w;
-                box.x = Math.min(prevRight - minSize, touchX); box.w = prevRight - box.x;
-                box.h = Math.max(minSize, touchY - box.y);
-            } else if (draggingCorner === 'br') {
-                box.w = Math.max(minSize, touchX - box.x); box.h = Math.max(minSize, touchY - box.y);
+        function toggleRecord() {
+            if (!isRecording) { startRecording(); } else { stopRecording(); }
+        }
+
+        function startRecording() {
+            recordedChunks = [];
+            const exportCanvas = document.createElement('canvas');
+            exportCanvas.width = 480;
+            exportCanvas.height = 854;
+            const exportCtx = exportCanvas.getContext('2d');
+            const stream = exportCanvas.captureStream(30);
+            
+            let options = { mimeType: 'video/webm;codecs=vp9', bitsPerSecond: 1200000 };
+            if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+                options = { mimeType: 'video/webm' };
             }
-            renderFrame();
+
+            mediaRecorder = new MediaRecorder(stream, options);
+            mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordedChunks.push(e.data); };
+            mediaRecorder.onstop = saveVideo;
+
+            function drawComposite() {
+                if (!isRecording) return;
+                exportCtx.drawImage(video, 0, 0, exportCanvas.width, exportCanvas.height);
+                exportCtx.drawImage(canvas, 0, 0, exportCanvas.width, exportCanvas.height);
+                requestAnimationFrame(drawComposite);
+            }
+
+            mediaRecorder.start();
+            isRecording = true;
+            exportBtn.innerText = "STOP & SAVE";
+            exportBtn.classList.add("recording");
+            
+            video.currentTime = 0;
+            video.play();
+            drawComposite();
         }
 
-        function handleEnd(e) { e.preventDefault(); draggingCorner = null; }
-
-        canvas.addEventListener('touchstart', handleStart, {passive: false});
-        canvas.addEventListener('touchmove', handleMove, {passive: false});
-        canvas.addEventListener('touchend', handleEnd, {passive: false});
-        canvas.addEventListener('mousedown', handleStart);
-        canvas.addEventListener('mousemove', handleMove);
-        window.addEventListener('mouseup', handleEnd);
-
-        function saveCurrentKeyframeSilent() {
-            const t = parseFloat(video.currentTime.toFixed(2));
-            ['container', 'truck'].forEach(target => {
-                const box = activeBoxes[target];
-                const list = keyframes[target];
-                const existingIdx = list.findIndex(k => Math.abs(k.t - t) < 0.1);
-                
-                const kData = {
-                    t: t,
-                    box: [round(box.x), round(box.y), round(box.w), round(box.h)],
-                    partial: box.partial,
-                    offscreen: box.offscreen
-                };
-
-                if (existingIdx >= 0) list[existingIdx] = kData;
-                else list.push(kData);
-                list.sort((a, b) => a.t - b.t);
-            });
-            updateJSONPreview();
+        function stopRecording() {
+            isRecording = false;
+            mediaRecorder.stop();
+            exportBtn.innerText = "EXPORT MP4";
+            exportBtn.classList.remove("recording");
         }
 
-        function saveCurrentKeyframe() {
-            saveCurrentKeyframeSilent();
-            checkFrameSavedStatus();
-            alert("Keyframe saved successfully for t = " + video.currentTime.toFixed(2) + "s!");
-        }
-
-        function updateJSONPreview() {
-            document.getElementById('jsonPreview').innerText = JSON.stringify(keyframes, null, 2);
-        }
-
-        function round(val) { return Math.round(val * 1000) / 1000; }
-
-        function exportJSON() {
-            saveCurrentKeyframeSilent();
-            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(keyframes, null, 2));
+        function saveVideo() {
+            const blob = new Blob(recordedChunks, { type: 'video/webm' });
+            const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
-            a.href = dataStr;
-            a.download = "control_keyframes.json";
+            a.style.display = 'none';
+            a.href = url;
+            a.download = `AR_Logistics_Output_${Date.now()}.webm`;
+            document.body.appendChild(a);
             a.click();
+            setTimeout(() => { document.body.removeChild(a); window.URL.revokeObjectURL(url); }, 100);
         }
+
+        video.addEventListener('play', () => { resizeCanvas(); requestAnimationFrame(renderLoop); });
+        window.addEventListener('load', () => { resizeCanvas(); renderLoop(); });
     </script>
 </body>
 </html>
