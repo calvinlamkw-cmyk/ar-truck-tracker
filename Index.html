@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>LOGIX AR Vision - Container & Truck OCR Tracker</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body, html {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #080C10;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            color: #E2E8F0;
+        }
+
+        /* Main Split-Screen Container */
+        #app-viewport {
+            display: flex;
+            width: 100vw;
+            height: 100vh;
+            background: #080C10;
+        }
+
+        /* Left Side: Video Viewport */
+        #video-container {
+            position: relative;
+            flex: 1;
+            height: 100%;
+            background: #000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        #webcam {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            display: block;
+        }
+
+        /* Canvas Overlay mapped to video frame */
+        #overlay-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 5;
+        }
+
+        /* Right Side: Telemetry Panel */
+        #side-panel {
+            width: 380px;
+            height: 100%;
+            background: #0F172A;
+            border-left: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
+            gap: 16px;
+            overflow-y: auto;
+            z-index: 10;
+        }
+
+        .panel-header {
+            font-size: 16px;
+            font-weight: 700;
+            letter-spacing: 1px;
+            color: #38BDF8;
+            padding-bottom: 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .badge {
+            font-size: 10px;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .badge-live {
+            background: rgba(16, 185, 129, 0.2);
+            color: #10B981;
+            border: 1px solid rgba(16, 185, 129, 0.4);
+        }
+
+        /* Telemetry Cards - Hidden by default until active */
+        .card {
+            display: none;
+            background: rgba(30, 41, 59, 0.9);
+            border: 1px solid rgba(56, 189, 248, 0.4);
+            border-radius: 12px;
+            padding: 16px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+            animation: fadeIn 0.3s ease;
+        }
+
+        .card.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(6px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .card-title {
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #94A3B8;
+            margin-bottom: 8px;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .card-main-val {
+            font-size: 20px;
+            font-weight: 700;
+            font-family: monospace;
+            color: #F8FAFC;
+            margin-bottom: 12px;
+        }
+
+        .card-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            font-size: 12px;
+        }
+
+        .data-label {
+            color: #64748B;
+        }
+
+        .data-val {
+            color: #CBD5E1;
+            font-weight: 600;
+        }
+
+        /* Top HUD Header on Video */
+        #top-bar {
+            position: absolute;
+            top: 16px;
+            left: 16px;
+            background: rgba(15, 23, 42, 0.8);
+            backdrop-filter: blur(8px);
+            padding: 8px 16px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            font-size: 13px;
+            z-index: 10;
+            display: flex;
+            gap: 16px;
+        }
+
+        .bar-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #10B981;
+            box-shadow: 0 0 8px #10B981;
+        }
+
+        /* Fallback Controls */
+        #controls {
+            position: absolute;
+            bottom: 16px;
+            left: 16px;
+            z-index: 10;
+            display: flex;
+            gap: 8px;
+        }
+
+        .btn {
+            background: rgba(30, 41, 59, 0.8);
+            color: #FFF;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            padding: 8px 14px;
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="app-viewport">
+        <!-- Video Viewport -->
+        <div id="video-container">
+            <div id="top-bar">
+                <div class="bar-item"><span class="dot"></span> AR VISION OCR</div>
+                <div class="bar-item" id="time-display">00:00</div>
+            </div>
+
+            <video id="webcam" src="15969738_540_960_30fps.mp4" autoplay playsinline muted loop crossorigin="anonymous"></video>
+            <canvas id="overlay-canvas"></canvas>
+
+            <div id="controls">
+                <button class="btn" onclick="document.getElementById('file-input').click()">📁 Load Video</button>
+                <input type="file" id="file-input" accept="video/*" style="display:none" onchange="loadCustomVideo(event)">
+            </div>
+        </div>
+
+        <!-- Telemetry Right Panel -->
+        <div id="side-panel">
+            <div class="panel-header">
+                CONTAINER YARD TELEMETRY
+                <span class="badge badge-live">SYNCED</span>
+            </div>
+
+            <!-- Container Card (Appears only when detected) -->
+            <div id="container-card" class="card">
+                <div class="card-title">
+                    <span>CONTAINER IDENTIFIER</span>
+                    <span style="color: #10B981;">TRACKED</span>
+                </div>
+                <div class="card-main-val">EGSU 021124 8</div>
+                <div class="card-grid">
+                    <div><span class="data-label">OPERATOR:</span> <span class="data-val">EVERGREEN</span></div>
+                    <div><span class="data-label">TYPE:</span> <span class="data-val">22G1 (20FT)</span></div>
+                    <div><span class="data-label">COLOR:</span> <span class="data-val">GREEN</span></div>
+                    <div><span class="data-label">OCR CONF:</span> <span class="data-val">98.4%</span></div>
+                </div>
+            </div>
+
+            <!-- Prime Mover Card (Appears only when detected) -->
+            <div id="truck-card" class="card">
+                <div class="card-title">
+                    <span>PRIME MOVER FLEET</span>
+                    <span style="color: #00E5FF;">TRACKED</span>
+                </div>
+                <div class="card-main-val">SLA 01</div>
+                <div class="card-grid">
+                    <div><span class="data-label">MODEL:</span> <span class="data-val">SCANIA R-SERIES</span></div>
+                    <div><span class="data-label">STATUS:</span> <span class="data-val">IN TRANSIT</span></div>
+                    <div><span class="data-label">DEST:</span> <span class="data-val">YARD ZONE B</span></div>
+                    <div><span class="data-label">SPEED:</span> <span class="data-val">12 KM/H</span></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const video = document.getElementById('webcam');
+        const canvas = document.getElementById('overlay-canvas');
+        const ctx = canvas.getContext('2d');
+        const timeDisplay = document.getElementById('time-display');
+
+        const containerCard = document.getElementById('container-card');
+        const truckCard = document.getElementById('truck-card');
+
+        function resizeCanvas() {
+            canvas.width = video.clientWidth;
+            canvas.height = video.clientHeight;
+        }
+
+        window.addEventListener('resize', resizeCanvas);
+        video.addEventListener('loadedmetadata', resizeCanvas);
+
+        function loadCustomVideo(e) {
+            const file = e.target.files[0];
+            if (file) {
+                video.src = URL.createObjectURL(file);
+                video.play();
+            }
+        }
+
+        // Calculates exact rendered video rect inside element (preventing letterbox overflow)
+        function getRenderedVideoRect() {
+            const vw = video.videoWidth || 960;
+            const vh = video.videoHeight || 540;
+            const cw = video.clientWidth;
+            const ch = video.clientHeight;
+
+            const vRatio = vw / vh;
+            const cRatio = cw / ch;
+
+            let rw, rh, rx, ry;
+            if (cRatio > vRatio) {
+                rh = ch;
+                rw = rh * vRatio;
+                rx = (cw - rw) / 2;
+                ry = 0;
+            } else {
+                rw = cw;
+                rh = rw / vRatio;
+                rx = 0;
+                ry = (ch - rh) / 2;
+            }
+            return { x: rx, y: ry, w: rw, h: rh };
+        }
+
+        // Normalized keyframes (0.0 to 1.0) moving consistently from left side
+        function getBoundingBoxes(t) {
+            let boxes = [];
+
+            // 1. Container (EGSU 021124 8) - Enters from left and moves right (0s to 13s)
+            if (t >= 0 && t <= 13) {
+                let progress = t / 13;
+                let nx = 0.05 + (progress * 0.25); // moving right from left side
+                let ny = 0.30;
+                let nw = 0.42;
+                let nh = 0.38;
+
+                boxes.push({
+                    type: 'container',
+                    label: 'EGSU 021124 8',
+                    sub: 'EVERGREEN 20FT',
+                    nx, ny, nw, nh,
+                    color: '#00FF66'
+                });
+            }
+
+            // 2. Truck Cab (SLA 01) - Enters from left (5s to 23s)
+            if (t >= 5 && t <= 23) {
+                let progress = (t - 5) / 18;
+                let nx = 0.02 + (progress * 0.35); // moving right from left side
+                let ny = 0.35;
+                let nw = 0.24;
+                let nh = 0.35;
+
+                boxes.push({
+                    type: 'truck',
+                    label: 'TRUCK: SLA 01',
+                    sub: 'SCANIA R-SERIES',
+                    nx, ny, nw, nh,
+                    color: '#00E5FF'
+                });
+            }
+
+            return boxes;
+        }
+
+        // Draw hollow AR bounding box mapped precisely to video pixels
+        function drawHollowARBox(box, vRect) {
+            const x = vRect.x + (box.nx * vRect.w);
+            const y = vRect.y + (box.ny * vRect.h);
+            const w = box.nw * vRect.w;
+            const h = box.nh * vRect.h;
+            const { color, label, sub } = box;
+
+            // Hollow Outer Border
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 2.5;
+            ctx.strokeRect(x, y, w, h);
+
+            // Thick HUD Corner Accents
+            const len = 14;
+            ctx.strokeStyle = '#FFFFFF';
+            ctx.lineWidth = 3.5;
+
+            // Top-Left
+            ctx.beginPath(); ctx.moveTo(x, y + len); ctx.lineTo(x, y); ctx.lineTo(x + len, y); ctx.stroke();
+            // Top-Right
+            ctx.beginPath(); ctx.moveTo(x + w - len, y); ctx.lineTo(x + w, y); ctx.lineTo(x + w, y + len); ctx.stroke();
+            // Bottom-Left
+            ctx.beginPath(); ctx.moveTo(x, y + len); ctx.lineTo(x, y + h); ctx.lineTo(x + len, y + h); ctx.stroke();
+            // Bottom-Right
+            ctx.beginPath(); ctx.moveTo(x + w - len, y + h); ctx.lineTo(x + w, y + h); ctx.lineTo(x + w, y + h - len); ctx.stroke();
+
+            // Floating Label Badge
+            ctx.fillStyle = color;
+            ctx.font = 'bold 11px sans-serif';
+            const badgeWidth = Math.max(ctx.measureText(label).width, ctx.measureText(sub).width) + 16;
+
+            ctx.fillRect(x, y - 30, badgeWidth, 26);
+
+            ctx.fillStyle = '#000000';
+            ctx.fillText(label, x + 6, y - 16);
+            ctx.font = '9px sans-serif';
+            ctx.fillText(sub, x + 6, y - 6);
+        }
+
+        // Render Loop
+        function renderLoop() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            const t = video.currentTime;
+            timeDisplay.innerText = `00:${Math.floor(t).toString().padStart(2, '0')}`;
+
+            const vRect = getRenderedVideoRect();
+            const activeBoxes = getBoundingBoxes(t);
+
+            let containerActive = false;
+            let truckActive = false;
+
+            activeBoxes.forEach(box => {
+                drawHollowARBox(box, vRect);
+                if (box.type === 'container') containerActive = true;
+                if (box.type === 'truck') truckActive = true;
+            });
+
+            // Toggle Telemetry Cards (Completely hidden when off-screen)
+            if (containerActive) {
+                containerCard.classList.add('active');
+            } else {
+                containerCard.classList.remove('active');
+            }
+
+            if (truckActive) {
+                truckCard.classList.add('active');
+            } else {
+                truckCard.classList.remove('active');
+            }
+
+            requestAnimationFrame(renderLoop);
+        }
+
+        video.addEventListener('play', () => {
+            resizeCanvas();
+            requestAnimationFrame(renderLoop);
+        });
+
+        window.addEventListener('load', () => {
+            resizeCanvas();
+            renderLoop();
+        });
+    </script>
+</body>
+</html>
