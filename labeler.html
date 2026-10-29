@@ -3,13 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <title>AR Vision - Interactive Bounding Box Calibrator</title>
-    <!-- Crucial for mobile interaction -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no"> 
     <style>
         body { font-family: system-ui, sans-serif; background: #0F172A; color: #F8FAFC; margin: 0; padding: 10px; display: flex; flex-direction: column; gap: 10px; }
         #app-viewport { display: flex; gap: 10px; width: 100%; }
         #canvas-container { position: relative; border: 2px solid #38BDF8; display: inline-block; flex-shrink: 0; }
-        canvas { display: block; cursor: crosshair; touch-action: none; /* Disable native browser touch handling */ }
+        canvas { display: block; cursor: crosshair; touch-action: none; }
         #controls { flex: 1; background: #1E293B; padding: 10px; border-radius: 8px; display: flex; flex-direction: column; gap: 10px; }
         button { background: #0284C7; color: white; border: none; padding: 10px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 14px; }
         button:hover { background: #0369A1; }
@@ -18,7 +17,6 @@
         .target-btn button.active { opacity: 1.0; border: 2px solid #FFF; }
         pre { background: #0F172A; padding: 8px; border-radius: 6px; font-size: 10px; max-height: 150px; overflow-y: auto; color: #81E6D9; }
         
-        /* Layout fix for iPad Portrait mode */
         @media (max-width: 768px) {
             #app-viewport { flex-direction: column; align-items: center; }
             #canvas-container { order: 1; }
@@ -27,6 +25,9 @@
     </style>
 </head>
 <body>
+
+    <!-- DOM-attached video element required for iOS Safari frame decoding -->
+    <video id="sourceVideo" src="15969738_540_960_30fps.mp4" crossorigin="anonymous" playsinline preload="auto" style="display:none;"></video>
 
     <div id="app-viewport">
         <div id="canvas-container">
@@ -57,10 +58,7 @@
     </div>
 
     <script>
-        const video = document.createElement('video');
-        video.src = '15969738_540_960_30fps.mp4';
-        video.crossOrigin = 'anonymous';
-
+        const video = document.getElementById('sourceVideo');
         const canvas = document.getElementById('editorCanvas');
         const ctx = canvas.getContext('2d');
         const timeSlider = document.getElementById('timeSlider');
@@ -69,31 +67,28 @@
         let currentTarget = 'container';
         let keyframes = { container: [], truck: [] };
         
-        // Initial coordinates normalized
         let activeBoxes = {
             container: { x: 0.38, y: 0.26, w: 0.31, h: 0.24, partial: true, offscreen: false },
             truck: { x: 0.03, y: 0.34, w: 0.22, h: 0.30, partial: true, offscreen: false }
         };
 
         let draggingCorner = null;
-        // Increase corner size for mobile touch
         const cornerSize = 20; 
 
         video.addEventListener('loadedmetadata', () => {
-            // Adaptive scale for iPad screen width (max 480w)
             const scaleFactor = 0.5;
             canvas.width = video.videoWidth * scaleFactor;
             canvas.height = video.videoHeight * scaleFactor;
             timeSlider.max = video.duration;
-            renderFrame();
+            video.currentTime = 0.1; // Force frame load
         });
+
+        video.addEventListener('seeked', renderFrame);
 
         timeSlider.addEventListener('input', (e) => {
             video.currentTime = e.target.value;
             timeVal.innerText = parseFloat(e.target.value).toFixed(2);
         });
-
-        video.addEventListener('seeked', renderFrame);
 
         function selectTarget(target) {
             currentTarget = target;
@@ -103,6 +98,7 @@
         }
 
         function renderFrame() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
             
             ['container', 'truck'].forEach(target => {
@@ -120,7 +116,6 @@
                 ctx.strokeRect(bx, by, bw, bh);
 
                 if (target === currentTarget) {
-                    // Larger, obvious white touch corners for iPad
                     ctx.fillStyle = '#FFFFFF';
                     ctx.strokeStyle = '#000000';
                     ctx.lineWidth = 1;
@@ -134,8 +129,107 @@
             });
         }
 
-        // --- NEW! NATIVE TOUCH EVENT LOGIC FOR IPAD ---
-
         function handleStart(e) {
             e.preventDefault();
             let touchX, touchY;
+            if (e.touches) {
+                const rect = canvas.getBoundingClientRect();
+                touchX = (e.touches[0].clientX - rect.left);
+                touchY = (e.touches[0].clientY - rect.top);
+            } else {
+                touchX = e.offsetX;
+                touchY = e.offsetY;
+            }
+
+            const box = activeBoxes[currentTarget];
+            const bx = box.x * canvas.width;
+            const by = box.y * canvas.height;
+            const bw = box.w * canvas.width;
+            const bh = box.h * canvas.height;
+            
+            const touchTolerance = cornerSize / 2 + 5;
+            if (Math.hypot(touchX - bx, touchY - by) < touchTolerance) draggingCorner = 'tl';
+            else if (Math.hypot(touchX - (bx + bw), touchY - by) < touchTolerance) draggingCorner = 'tr';
+            else if (Math.hypot(touchX - bx, touchY - (by + bh)) < touchTolerance) draggingCorner = 'bl';
+            else if (Math.hypot(touchX - (bx + bw), touchY - (by + bh)) < touchTolerance) draggingCorner = 'br';
+        }
+
+        function handleMove(e) {
+            if (!draggingCorner) return;
+            e.preventDefault();
+            
+            let touchX, touchY;
+            if (e.touches) {
+                const rect = canvas.getBoundingClientRect();
+                touchX = (e.touches[0].clientX - rect.left) / canvas.width;
+                touchY = (e.touches[0].clientY - rect.top) / canvas.height;
+            } else {
+                touchX = e.offsetX / canvas.width;
+                touchY = e.offsetY / canvas.height;
+            }
+
+            const box = activeBoxes[currentTarget];
+            const minSize = 0.05;
+
+            if (draggingCorner === 'tl') {
+                const prevRight = box.x + box.w; const prevBottom = box.y + box.h;
+                box.x = Math.min(prevRight - minSize, touchX); box.y = Math.min(prevBottom - minSize, touchY);
+                box.w = prevRight - box.x; box.h = prevBottom - box.y;
+            } else if (draggingCorner === 'tr') {
+                const prevBottom = box.y + box.h;
+                box.w = Math.max(minSize, touchX - box.x); box.y = Math.min(prevBottom - minSize, touchY);
+                box.h = prevBottom - box.y;
+            } else if (draggingCorner === 'bl') {
+                const prevRight = box.x + box.w;
+                box.x = Math.min(prevRight - minSize, touchX); box.w = prevRight - box.x;
+                box.h = Math.max(minSize, touchY - box.y);
+            } else if (draggingCorner === 'br') {
+                box.w = Math.max(minSize, touchX - box.x); box.h = Math.max(minSize, touchY - box.y);
+            }
+            renderFrame();
+        }
+
+        function handleEnd(e) { e.preventDefault(); draggingCorner = null; }
+
+        canvas.addEventListener('touchstart', handleStart, {passive: false});
+        canvas.addEventListener('touchmove', handleMove, {passive: false});
+        canvas.addEventListener('touchend', handleEnd, {passive: false});
+        canvas.addEventListener('mousedown', handleStart);
+        canvas.addEventListener('mousemove', handleMove);
+        window.addEventListener('mouseup', handleEnd);
+
+        function saveCurrentKeyframe() {
+            const t = parseFloat(video.currentTime.toFixed(2));
+            const box = activeBoxes[currentTarget];
+            box.partial = document.getElementById('partialCheck').checked;
+            box.offscreen = document.getElementById('offscreenCheck').checked;
+
+            const list = keyframes[currentTarget];
+            const existingIdx = list.findIndex(k => Math.abs(k.t - t) < 0.1);
+            
+            const kData = {
+                t: t,
+                box: [round(box.x), round(box.y), round(box.w), round(box.h)],
+                partial: box.partial,
+                offscreen: box.offscreen
+            };
+
+            if (existingIdx >= 0) list[existingIdx] = kData;
+            else list.push(kData);
+
+            list.sort((a, b) => a.t - b.t);
+            document.getElementById('jsonPreview').innerText = JSON.stringify(keyframes, null, 2);
+        }
+
+        function round(val) { return Math.round(val * 1000) / 1000; }
+
+        function exportJSON() {
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(keyframes, null, 2));
+            const a = document.createElement('a');
+            a.href = dataStr;
+            a.download = "control_keyframes.json";
+            a.click();
+        }
+    </script>
+</body>
+</html>
